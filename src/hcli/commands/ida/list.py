@@ -21,7 +21,7 @@ def list_instances() -> None:
 
     if not instances:
         console.print("[yellow]No IDA Pro instances registered.[/yellow]")
-        console.print("[yellow]Use 'hcli ida instance add --auto' to discover and add IDA installations.[/yellow]")
+        console.print("[yellow]Use 'hcli ida add --auto' to discover and add IDA installations.[/yellow]")
         return
 
     # Create table
@@ -65,4 +65,4 @@ def list_instances() -> None:
         else:
             console.print(f"[red]Default instance '{default_instance}' no longer exists![/red]")
     else:
-        console.print("[yellow]No default instance set. Use 'hcli ida instance set-default' to set one.[/yellow]")
+        console.print("[yellow]No default instance set. Use 'hcli ida switch' to set one.[/yellow]")

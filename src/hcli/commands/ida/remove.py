@@ -68,7 +68,7 @@ def _remove_single_instance(name: str, instances: dict[str, str]) -> None:
             for instance_name in instances.keys():
                 console.print(f"  - {instance_name}")
         else:
-            console.print("[yellow]No IDA instances registered. Use 'hcli ida instance add' to add instances.[/yellow]")
+            console.print("[yellow]No IDA instances registered. Use 'hcli ida add' to add instances.[/yellow]")
         raise click.Abort()
 
     # Check if this is the default instance

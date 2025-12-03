@@ -1,4 +1,4 @@
-"""Open idb:// links in running IDA instances."""
+"""Open ida:// links in running IDA instances."""
 
 from __future__ import annotations
 
@@ -17,8 +17,30 @@ from hcli.lib.ida.launcher import IDALauncher, LaunchConfig
 console = Console()
 
 
-@click.command(name="open-link")
-@click.argument("uri", required=True)
+def _list_running_instances() -> None:
+    """List all running IDA instances with IPC sockets."""
+    instances = find_all_instances_with_info()
+
+    if not instances:
+        console.print("[yellow]No running IDA instances found.[/yellow]")
+        return
+
+    console.print(f"[green]Found {len(instances)} IDA instance(s):[/green]")
+    for instance in instances:
+        if instance.has_idb:
+            console.print(f"  PID {instance.pid}: {instance.idb_name} ({instance.idb_path})")
+        else:
+            console.print(f"  PID {instance.pid}: [dim]no IDB loaded[/dim]")
+
+
+@click.command(name="open")
+@click.argument("uri", required=False)
+@click.option(
+    "--list",
+    "list_instances",
+    is_flag=True,
+    help="List all running IDA instances with IPC sockets",
+)
 @click.option(
     "--no-launch",
     is_flag=True,
@@ -35,8 +57,8 @@ console = Console()
     is_flag=True,
     help="Don't wait for auto-analysis to complete after launching IDA",
 )
-def open_link(uri: str, no_launch: bool, timeout: float, skip_analysis: bool) -> None:
-    """Open an idb:// link in the appropriate IDA instance.
+def open_link(uri: str | None, list_instances: bool, no_launch: bool, timeout: float, skip_analysis: bool) -> None:
+    """Open an ida:// link in the appropriate IDA instance.
 
     This command finds a running IDA instance that has the specified IDB open
     and sends it an open_link command to navigate to the specified location.
@@ -44,11 +66,17 @@ def open_link(uri: str, no_launch: bool, timeout: float, skip_analysis: bool) ->
     If no matching instance is found and --no-launch is not set, IDA will be
     launched with the IDB file (searched in configured idb.search-paths).
 
+    Use --list to show all running IDA instances.
+
     Example URIs:
-        idb://myfile.idb/functions?ea=0x401000
-        idb://sample.i64/addresses?ea=0x401000&view=disasm
-        idb://target.idb/types?name=MyStruct
+        ida://myfile.idb/functions?ea=0x401000
+        ida://sample.i64/addresses?ea=0x401000&view=disasm
+        ida://target.idb/types?name=MyStruct
     """
+    if list_instances:
+        _list_running_instances()
+        return
+
     if not uri:
         console.print("[red]Error: No URI provided[/red]")
         raise click.Abort()
@@ -57,14 +85,14 @@ def open_link(uri: str, no_launch: bool, timeout: float, skip_analysis: bool) ->
     parsed = urlparse(uri)
 
     if parsed.scheme != "idb":
-        console.print(f"[red]Error: Expected idb:// URL, got {parsed.scheme}://[/red]")
+        console.print(f"[red]Error: Expected ida:// URL, got {parsed.scheme}://[/red]")
         raise click.Abort()
 
-    target_idb_name = parsed.netloc  # e.g., "myfile.idb" from idb://myfile.idb/...
+    target_idb_name = parsed.netloc  # e.g., "myfile.idb" from ida://myfile.idb/...
 
     if not target_idb_name:
         console.print("[red]Error: No IDB name in URL[/red]")
-        console.print("[yellow]Expected format: idb://<idb-name>/<resource>?<params>[/yellow]")
+        console.print("[yellow]Expected format: ida://<idb-name>/<resource>?<params>[/yellow]")
         raise click.Abort()
 
     # Discover running IDA instances
@@ -136,20 +164,3 @@ def open_link(uri: str, no_launch: bool, timeout: float, skip_analysis: bool) ->
     else:
         console.print(f"[red]Error: {message}[/red]")
         raise click.Abort()
-
-
-@click.command(name="list-instances")
-def list_instances() -> None:
-    """List all running IDA instances with IPC sockets."""
-    instances = find_all_instances_with_info()
-
-    if not instances:
-        console.print("[yellow]No running IDA instances found.[/yellow]")
-        return
-
-    console.print(f"[green]Found {len(instances)} IDA instance(s):[/green]")
-    for instance in instances:
-        if instance.has_idb:
-            console.print(f"  PID {instance.pid}: {instance.idb_name} ({instance.idb_path})")
-        else:
-            console.print(f"  PID {instance.pid}: [dim]no IDB loaded[/dim]")

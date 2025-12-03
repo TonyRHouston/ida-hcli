@@ -6,7 +6,9 @@ and wait for it to become ready via IPC.
 
 from __future__ import annotations
 
+import getpass
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -194,58 +196,59 @@ class IDALauncher:
             return LaunchResult(success=False, error_message=str(e))
 
         # Launch IDA process
-        report(f"Launching IDA: {ida_bin.name}")
+        # On macOS, use 'open -a' to launch via LaunchServices, which escapes
+        # any sandbox restrictions from protocol handlers
+        if sys.platform == "darwin":
+            # Extract .app bundle path from binary path
+            # e.g., /Applications/IDA.app/Contents/MacOS/ida -> /Applications/IDA.app
+            ida_bin_str = str(ida_bin)
+            if "/Contents/MacOS/" in ida_bin_str:
+                app_bundle = ida_bin_str.split("/Contents/MacOS/")[0]
+                # Use --args to pass the IDB path as an argument to the app
+                cmd = ["open", "-a", app_bundle, "--args", str(idb_path)]
+            else:
+                cmd = [ida_bin_str, str(idb_path)]
+        else:
+            cmd = [str(ida_bin), str(idb_path)]
+
+        report(f"Command: {' '.join(cmd)}")
+        report(f"User: {getpass.getuser()}, CWD: {os.getcwd()}")
+
         try:
-            process = subprocess.Popen(
-                [str(ida_bin), str(idb_path)],
+            subprocess.Popen(
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,  # Detach from parent
+                start_new_session=True,
             )
         except OSError as e:
             return LaunchResult(success=False, error_message=f"Failed to start IDA: {e}")
 
-        pid = process.pid
-        socket_path = self._get_expected_socket_path(pid)
+        # Calculate timeout
+        total_timeout = timeout if timeout is not None else (
+            self.config.socket_timeout + self.config.idb_loaded_timeout
+        )
 
-        # Calculate timeouts
-        socket_timeout = self.config.socket_timeout
-        idb_timeout = self.config.idb_loaded_timeout
-        if timeout is not None:
-            # Distribute timeout between phases
-            socket_timeout = min(self.config.socket_timeout, timeout * 0.3)
-            idb_timeout = min(self.config.idb_loaded_timeout, timeout * 0.7)
-
-        # Wait for socket to become responsive
-        report(f"Waiting for IDA (PID {pid}) to initialize...")
+        # Wait for IDA instance with our IDB to appear
+        target_idb_name = idb_path.name
+        report(f"Waiting for IDA to open {target_idb_name}...")
         try:
-            self._wait_for_socket_responsive(process, socket_path, socket_timeout)
-        except IDALaunchError as e:
-            return LaunchResult(success=False, process=process, error_message=str(e))
+            instance = self._wait_for_idb_instance(target_idb_name, total_timeout)
         except IDAStartupTimeout as e:
-            return LaunchResult(success=False, process=process, error_message=str(e))
-
-        # Wait for IDB to be loaded
-        report("Waiting for IDB to load...")
-        try:
-            instance = self._wait_for_idb_loaded(process, socket_path, idb_timeout)
-        except IDALaunchError as e:
-            return LaunchResult(success=False, process=process, error_message=str(e))
-        except IDAStartupTimeout as e:
-            return LaunchResult(success=False, process=process, error_message=str(e))
+            return LaunchResult(success=False, error_message=str(e))
 
         # Wait for auto-analysis to complete (unless skipped)
         if not self.config.skip_analysis_wait:
             report("Waiting for auto-analysis to complete (Ctrl+C to skip)...")
             try:
-                self._wait_for_analysis(process, socket_path, report)
+                self._wait_for_analysis_on_instance(instance.socket_path, report)
             except IDALaunchError as e:
-                return LaunchResult(success=False, process=process, error_message=str(e))
+                return LaunchResult(success=False, error_message=str(e))
             except KeyboardInterrupt:
                 report("Analysis wait cancelled by user")
 
         report("IDA is ready!")
-        return LaunchResult(success=True, instance=instance, process=process)
+        return LaunchResult(success=True, instance=instance)
 
     def _get_expected_socket_path(self, pid: int) -> str:
         """Get expected IPC socket/pipe path for a PID."""
@@ -378,4 +381,62 @@ class IDALauncher:
                 continue
 
             # Error status
+            raise IDALaunchError(f"Analysis error: {result.message}")
+
+    def _wait_for_idb_instance(self, idb_name: str, timeout: float) -> IDAInstance:
+        """Wait for an IDA instance with the specified IDB to appear.
+
+        Polls all IDA IPC sockets looking for one with the matching IDB.
+        """
+        start = time.monotonic()
+        interval = self.config.initial_poll_interval
+
+        while time.monotonic() - start < timeout:
+            # Discover all IDA instances
+            instances = IDAIPCClient.discover_instances()
+            for instance in instances:
+                info = IDAIPCClient.query_instance(instance.socket_path)
+                if info and info.has_idb and info.idb_name:
+                    if info.idb_name.lower() == idb_name.lower():
+                        return info
+
+            time.sleep(interval)
+            interval = min(
+                interval * self.config.backoff_multiplier, self.config.max_poll_interval
+            )
+
+        raise IDAStartupTimeout(timeout, "waiting for IDB instance")
+
+    def _wait_for_analysis_on_instance(
+        self,
+        socket_path: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> None:
+        """Wait for auto-analysis to complete on a known instance.
+
+        Similar to _wait_for_analysis but without process health checks
+        (used when we launched via 'open -a' and don't have a process handle).
+        """
+        poll_ms = int(self.config.analysis_poll_interval * 1000)
+        start = time.monotonic()
+
+        while True:
+            result = IDAIPCClient.wait_for_analysis(socket_path, timeout_ms=poll_ms)
+
+            if result.success:
+                elapsed = time.monotonic() - start
+                if progress_callback:
+                    progress_callback(f"Analysis complete ({elapsed:.1f}s)")
+                return
+
+            if result.status == "cancelled":
+                raise IDALaunchError("Analysis cancelled by user in IDA")
+
+            if result.status == "timeout":
+                elapsed = time.monotonic() - start
+                if progress_callback:
+                    progress_callback(f"Waiting for analysis... ({elapsed:.0f}s)")
+                continue
+
+            # Error status - IDA may have closed
             raise IDALaunchError(f"Analysis error: {result.message}")

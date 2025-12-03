@@ -231,7 +231,7 @@ class IDAIPCClient:
 
         Args:
             socket_path: Path to the socket file or named pipe.
-            uri: The idb:// URI to open.
+            uri: The ida:// URI to open.
 
         Returns:
             Tuple of (success: bool, message: str).

@@ -21,7 +21,7 @@ def switch(name: str | None) -> None:
 
     if not instances:
         console.print("[yellow]No IDA Pro instances registered.[/yellow]")
-        console.print("[yellow]Use 'hcli ida instance add --auto' to discover and add IDA installations.[/yellow]")
+        console.print("[yellow]Use 'hcli ida add --auto' to discover and add IDA installations.[/yellow]")
         raise click.Abort()
 
     # If name is provided, validate and set it
