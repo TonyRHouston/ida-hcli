@@ -378,6 +378,24 @@ class IDALauncher:
 
             time.sleep(self.config.analysis_poll_interval)
 
+    @staticmethod
+    def _strip_idb_extension(name: str) -> str:
+        """Strip .i64 or .idb extension from filename."""
+        lower = name.lower()
+        if lower.endswith('.i64') or lower.endswith('.idb'):
+            return name[:-4]
+        return name
+
+    def _idb_names_match(self, ida_idb_name: str, target_name: str) -> bool:
+        """Check if IDA's IDB name matches the target name.
+
+        Handles the case where target is 'foo.bin' but IDA reports 'foo.bin.i64'.
+        """
+        # Strip IDB extensions and compare
+        ida_base = self._strip_idb_extension(ida_idb_name).lower()
+        target_base = self._strip_idb_extension(target_name).lower()
+        return ida_base == target_base
+
     def _wait_for_idb_instance(self, idb_name: str, timeout: float) -> IDAInstance:
         """Wait for an IDA instance with the specified IDB to appear.
 
@@ -392,7 +410,7 @@ class IDALauncher:
             for instance in instances:
                 info = IDAIPCClient.query_instance(instance.socket_path)
                 if info and info.has_idb and info.idb_name:
-                    if info.idb_name.lower() == idb_name.lower():
+                    if self._idb_names_match(info.idb_name, idb_name):
                         return info
 
             time.sleep(interval)

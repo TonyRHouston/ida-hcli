@@ -14,6 +14,21 @@ from hcli.lib.ida.ipc import (
 )
 from hcli.lib.ida.launcher import IDALauncher, LaunchConfig
 
+
+def _strip_idb_extension(name: str) -> str:
+    """Strip .i64 or .idb extension from filename."""
+    lower = name.lower()
+    if lower.endswith('.i64') or lower.endswith('.idb'):
+        return name[:-4]
+    return name
+
+
+def _idb_names_match(ida_idb_name: str, target_name: str) -> bool:
+    """Check if IDA's IDB name matches the target name."""
+    ida_base = _strip_idb_extension(ida_idb_name).lower()
+    target_base = _strip_idb_extension(target_name).lower()
+    return ida_base == target_base
+
 console = Console()
 
 
@@ -107,7 +122,7 @@ def open_link(uri: str | None, list_instances: bool, no_launch: bool, timeout: f
         info = IDAIPCClient.query_instance(instance.socket_path)
         if info and info.has_idb:
             all_idbs.append(info.idb_name)
-            if info.idb_name and info.idb_name.lower() == target_idb_name.lower():
+            if info.idb_name and _idb_names_match(info.idb_name, target_idb_name):
                 matching_instance = info
                 break
 
