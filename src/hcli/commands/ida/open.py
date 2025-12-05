@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
+import sys
+
 import rich_click as click
 from rich.console import Console
 
@@ -30,6 +32,16 @@ def _idb_names_match(ida_idb_name: str, target_name: str) -> bool:
     return ida_base == target_base
 
 console = Console()
+
+def _print(msg: str) -> None:
+    """Print message only when running interactively (stdin is a TTY).
+
+    When invoked via protocol handler (xdg-open), stdin is not a TTY and
+    xdg-open returns immediately, spawning hcli asynchronously. Any output
+    would appear after the shell prompt, cluttering the terminal.
+    """
+    if sys.stdin.isatty():
+        console.print(msg)
 
 
 def _list_running_instances() -> None:
@@ -111,7 +123,7 @@ def open_link(uri: str | None, list_instances: bool, no_launch: bool, timeout: f
         raise click.Abort()
 
     # Discover running IDA instances
-    console.print(f"[dim]Looking for IDA instance with '{target_idb_name}'...[/dim]")
+    _print(f"[dim]Looking for IDA instance with '{target_idb_name}'...[/dim]")
     instances = IDAIPCClient.discover_instances()
 
     # Query each instance to find one with the matching IDB
@@ -171,11 +183,11 @@ def open_link(uri: str | None, list_instances: bool, no_launch: bool, timeout: f
 
     # Send open_link command
     assert matching_instance is not None  # Should never be None at this point
-    console.print(f"[dim]Sending command to IDA (PID {matching_instance.pid})...[/dim]")
+    _print(f"[dim]Sending command to IDA (PID {matching_instance.pid})...[/dim]")
     success, message = IDAIPCClient.send_open_link(matching_instance.socket_path, uri)
 
     if success:
-        console.print(f"[green]Navigated to: {uri}[/green]")
+        _print(f"[green]Navigated to: {uri}[/green]")
     else:
         console.print(f"[red]Error: {message}[/red]")
         raise click.Abort()
