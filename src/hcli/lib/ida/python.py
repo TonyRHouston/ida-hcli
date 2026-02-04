@@ -10,6 +10,22 @@ from hcli.lib.ida import run_py_in_current_idapython
 logger = logging.getLogger(__name__)
 
 
+def is_windows_store_shim(path: str | None) -> bool:
+    """Check if a path is a Windows Store Python shim.
+
+    The Windows Store shims are at paths like:
+        C:\\Users\\...\\AppData\\Local\\Microsoft\\WindowsApps\\python3.EXE
+
+    These are just redirectors that don't work like a real Python installation
+    and should be avoided when detecting IDA's Python.
+    """
+    if path is None:
+        return False
+    # Normalize to lowercase and check for both slash types
+    lowered = path.lower()
+    return "microsoft\\windowsapps" in lowered or "microsoft/windowsapps" in lowered
+
+
 FIND_PYTHON_PY = """
 # output like:
 #
@@ -18,12 +34,72 @@ import shutil
 import os.path
 import sys
 import json
-def find_python_executable():
-    exe = sys.executable
-    if "python" in os.path.basename(exe).lower():
-      return exe
 
+
+def is_windows_store_shim(path):
+    '''Check if a path is a Windows Store Python shim.
+
+    The Windows Store shims are at paths like:
+        C:\\Users\\...\\AppData\\Local\\Microsoft\\WindowsApps\\python3.EXE
+
+    These are just redirectors that don't work like a real Python installation
+    and should be avoided.
+    '''
+    if path is None:
+        return False
+    # Normalize to lowercase and check for both slash types
+    lowered = path.lower()
+    return "microsoft\\\\windowsapps" in lowered or "microsoft/windowsapps" in lowered
+
+
+def find_python_from_prefix():
+    '''Try to find Python executable from sys.prefix.
+
+    This is particularly useful on Windows where sys.executable may return
+    the host application (like idat.exe) instead of python.exe when running
+    embedded Python.
+    '''
+    prefix = sys.prefix
+    if not prefix:
+        return None
+
+    # On Windows, Python is typically at prefix/python.exe
+    if sys.platform == "win32":
+        candidate = os.path.join(prefix, "python.exe")
+        if os.path.isfile(candidate):
+            return candidate
+
+    # On Unix-like systems, check bin/python3 and bin/python
+    for name in ("python3", "python"):
+        candidate = os.path.join(prefix, "bin", name)
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+def find_python_executable():
+    # 1. First, check sys.executable if it looks like a Python interpreter
+    exe = sys.executable
+    if exe and "python" in os.path.basename(exe).lower():
+        if not is_windows_store_shim(exe):
+            return exe
+
+    # 2. Try to find Python from sys.prefix (reliable in IDA's embedded Python)
+    prefix_python = find_python_from_prefix()
+    if prefix_python and not is_windows_store_shim(prefix_python):
+        return prefix_python
+
+    # 3. Fall back to shutil.which, but filter out Windows Store shims
+    for cmd in ("python3", "python"):
+        candidate = shutil.which(cmd)
+        if candidate and not is_windows_store_shim(candidate):
+            return candidate
+
+    # 4. Last resort: return whatever we can find, even if it's a shim
     return shutil.which("python3") or shutil.which("python")
+
+
 print("__hcli__:" + json.dumps(find_python_executable()))
 sys.exit()
 """

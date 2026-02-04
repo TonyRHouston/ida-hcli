@@ -7,6 +7,7 @@ from hcli.lib.ida.python import (
     CantInstallPackagesError,
     does_current_ida_have_pip,
     find_current_python_executable,
+    is_windows_store_shim,
     verify_pip_can_install_packages,
 )
 
@@ -20,6 +21,47 @@ def has_idat():
         return False
 
     return True
+
+
+class TestIsWindowsStoreShim:
+    """Tests for is_windows_store_shim function that detects Windows Store Python shims."""
+
+    def test_detects_windows_store_python_shim(self):
+        """Test that Windows Store Python shim paths are correctly detected."""
+        # Typical Windows Store Python shim paths
+        assert is_windows_store_shim(r"C:\Users\User\AppData\Local\Microsoft\WindowsApps\python3.exe")
+        assert is_windows_store_shim(r"C:\Users\User\AppData\Local\Microsoft\WindowsApps\python.exe")
+        assert is_windows_store_shim(r"C:\Users\User\AppData\Local\Microsoft\WindowsApps\python3.12.exe")
+
+    def test_detects_windows_store_shim_case_insensitive(self):
+        """Test that detection is case insensitive."""
+        assert is_windows_store_shim(r"C:\Users\User\AppData\Local\MICROSOFT\WINDOWSAPPS\python3.exe")
+        assert is_windows_store_shim(r"c:\users\user\appdata\local\microsoft\windowsapps\python3.exe")
+
+    def test_does_not_flag_legitimate_python_paths(self):
+        """Test that legitimate Python installations are not flagged as shims."""
+        # Standard Python installations
+        assert not is_windows_store_shim(r"C:\Python312\python.exe")
+        assert not is_windows_store_shim(r"C:\Program Files\Python312\python.exe")
+        assert not is_windows_store_shim(r"C:\Users\User\AppData\Local\Programs\Python\Python312\python.exe")
+
+        # IDA's bundled Python
+        assert not is_windows_store_shim(r"C:\Program Files\IDA Professional 9.2\python314\python.exe")
+
+        # Linux/macOS paths
+        assert not is_windows_store_shim("/usr/bin/python3")
+        assert not is_windows_store_shim("/usr/local/bin/python")
+        assert not is_windows_store_shim("/home/user/.local/bin/python3")
+        assert not is_windows_store_shim("/Applications/IDA Professional 9.2.app/Contents/MacOS/python3")
+
+    def test_handles_none_input(self):
+        """Test that None input returns False."""
+        assert not is_windows_store_shim(None)
+
+    def test_handles_forward_slash_paths(self):
+        """Test that forward slash paths are also detected."""
+        # Some tools might normalize to forward slashes
+        assert is_windows_store_shim("C:/Users/User/AppData/Local/Microsoft/WindowsApps/python3.exe")
 
 
 @pytest.mark.skipif(not has_idat(), reason="Skip when idat not present (Free/Home)")
