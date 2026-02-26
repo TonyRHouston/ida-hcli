@@ -44,7 +44,7 @@ jobs:
   tests:
     name: ${{ matrix.os_ida.name}}/py${{ matrix.python-version }}
     needs: basic-test
-    runs-on: ${{ matrix.os_ida.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
